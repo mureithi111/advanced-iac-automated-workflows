@@ -1,0 +1,1 @@
+{"status":"Success","message":"Configuration retrieved successfully","parameterName":"/app/config/greeting","greeting":"Hello from CI/CD Automated Infrastructure!","input":{"test":"manual-lambda-test","source":"developer"}}
