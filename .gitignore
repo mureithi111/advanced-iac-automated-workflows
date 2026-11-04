@@ -2,9 +2,14 @@
 
 
 node_modules/
+lambda/node_modules/
 cdk.out/
 dist/
 coverage/
+lambda-deploy.zip
+lambda-fixed-response.json
+lambda-test-event.json
+lambda-response.json
 *.js
 !jest.config.js
 *.d.ts
