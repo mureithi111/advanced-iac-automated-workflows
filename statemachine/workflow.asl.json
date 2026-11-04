@@ -1,0 +1,55 @@
+{
+  "Comment": "Advanced IaC Automated Workflow",
+  "StartAt": "PrepareWorkflow",
+  "States": {
+    "PrepareWorkflow": {
+      "Type": "Pass",
+      "Comment": "Prepare the workflow input",
+      "Parameters": {
+        "message": "Preparing automated workflow",
+        "originalInput.$": "$"
+      },
+      "Next": "WaitBeforeProcessing"
+    },
+    "WaitBeforeProcessing": {
+      "Type": "Wait",
+      "Seconds": 2,
+      "Next": "RetrieveConfiguration"
+    },
+    "RetrieveConfiguration": {
+      "Type": "Task",
+      "Resource": "LAMBDA_ARN_PLACEHOLDER",
+      "Parameters": {
+        "Payload.$": "$"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "WorkflowFailure"
+        }
+      ],
+      "End": true
+    },
+    "WorkflowFailure": {
+      "Type": "Fail",
+      "Error": "ConfigurationRetrievalFailed",
+      "Cause": "The Lambda function could not retrieve the configuration."
+    }
+  }
+}
