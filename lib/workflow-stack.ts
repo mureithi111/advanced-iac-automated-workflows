@@ -1,4 +1,3 @@
-
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
@@ -11,107 +10,75 @@ import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as path from 'path';
 
 export class WorkflowStack extends cdk.Stack {
-  constructor(
-    scope: Construct,
-    id: string,
-    props?: cdk.StackProps
-  ) {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // =========================================
-    // 1. CREATE SSM PARAMETER
-    // =========================================
-
+    // Production gets its own parameter to avoid conflicting
+    // with the parameter used by the older deployed application.
     const greetingParameter = new ssm.StringParameter(
       this,
       'AppGreetingParameter',
       {
-        parameterName: '/app/config/greeting',
+        parameterName: '/app/config/greeting-prod',
         stringValue: 'Hello from CI/CD Automated Infrastructure!',
       }
     );
 
-    // =========================================
-    // 2. CREATE LAMBDA LOG GROUP
-    // =========================================
-
+    // Dedicated Production Lambda log group.
     const workflowLambdaLogGroup = new logs.LogGroup(
       this,
       'AdvancedWorkflowLambdaLogGroup',
       {
-        logGroupName: '/aws/lambda/advanced-iac-workflow-lambda',
+        logGroupName: '/aws/lambda/advanced-iac-workflow-lambda-prod',
         retention: logs.RetentionDays.ONE_MONTH,
         removalPolicy: cdk.RemovalPolicy.RETAIN,
       }
     );
 
-    // =========================================
-    // 3. CREATE LAMBDA FUNCTION
-    // =========================================
-
+    // Dedicated Production Lambda function.
     const workflowLambda = new lambda.Function(
       this,
       'AdvancedWorkflowLambda',
       {
-        functionName: 'advanced-iac-workflow-lambda',
+        functionName: 'advanced-iac-workflow-lambda-prod',
         runtime: lambda.Runtime.NODEJS_22_X,
         handler: 'index.handler',
-
         code: lambda.Code.fromAsset(
           path.join(__dirname, '../lambda')
         ),
-
         timeout: cdk.Duration.seconds(30),
         memorySize: 256,
-
         logGroup: workflowLambdaLogGroup,
-
         environment: {
           PARAMETER_NAME: greetingParameter.parameterName,
         },
       }
     );
 
-    // =========================================
-    // 4. GRANT SSM READ PERMISSION TO LAMBDA
-    // =========================================
-
     greetingParameter.grantRead(workflowLambda);
 
-    // =========================================
-    // 5. CREATE STEP FUNCTIONS LOG GROUP
-    // =========================================
-
+    // Dedicated Production Step Functions log group.
     const stateMachineLogGroup = new logs.LogGroup(
       this,
       'WorkflowStateMachineLogGroup',
       {
-        logGroupName: '/aws/stepfunctions/advanced-iac-workflow',
+        logGroupName: '/aws/stepfunctions/advanced-iac-workflow-prod',
         retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
       }
     );
-
-    // =========================================
-    // 6. CREATE PASS STATE
-    // =========================================
 
     const prepareWorkflow = new stepfunctions.Pass(
       this,
       'PrepareWorkflow',
       {
         comment: 'Prepare the workflow input',
-
         parameters: {
           message: 'Preparing automated workflow',
           'originalInput.$': '$',
         },
       }
     );
-
-    // =========================================
-    // 7. CREATE WAIT STATE
-    // =========================================
 
     const waitState = new stepfunctions.Wait(
       this,
@@ -123,24 +90,15 @@ export class WorkflowStack extends cdk.Stack {
       }
     );
 
-    // =========================================
-    // 8. CREATE LAMBDA TASK
-    // =========================================
-
     const retrieveConfiguration = new tasks.LambdaInvoke(
       this,
       'RetrieveConfiguration',
       {
         lambdaFunction: workflowLambda,
         payloadResponseOnly: true,
-
         payload: stepfunctions.TaskInput.fromJsonPathAt('$'),
       }
     );
-
-    // =========================================
-    // 9. CONFIGURE RETRIES
-    // =========================================
 
     retrieveConfiguration.addRetry({
       errors: [
@@ -149,15 +107,10 @@ export class WorkflowStack extends cdk.Stack {
         'Lambda.SdkClientException',
         'Lambda.TooManyRequestsException',
       ],
-
       interval: cdk.Duration.seconds(2),
       maxAttempts: 3,
       backoffRate: 2,
     });
-
-    // =========================================
-    // 10. CONFIGURE ERROR HANDLING
-    // =========================================
 
     const workflowFailure = new stepfunctions.Fail(
       this,
@@ -168,42 +121,24 @@ export class WorkflowStack extends cdk.Stack {
       }
     );
 
-    retrieveConfiguration.addCatch(
-      workflowFailure,
-      {
-        errors: ['States.ALL'],
-        resultPath: '$.error',
-      }
-    );
-
-    // =========================================
-    // 11. CONNECT WORKFLOW STATES
-    // =========================================
+    retrieveConfiguration.addCatch(workflowFailure, {
+      errors: ['States.ALL'],
+      resultPath: '$.error',
+    });
 
     const definition = prepareWorkflow
       .next(waitState)
       .next(retrieveConfiguration);
-
-    // =========================================
-    // 12. CREATE STATE MACHINE
-    // =========================================
 
     const stateMachine = new stepfunctions.StateMachine(
       this,
       'AdvancedWorkflowStateMachine',
       {
         stateMachineName: 'AdvancedWorkflowStateMachine',
-
         definitionBody:
-          stepfunctions.DefinitionBody.fromChainable(
-            definition
-          ),
-
-        stateMachineType:
-          stepfunctions.StateMachineType.STANDARD,
-
+          stepfunctions.DefinitionBody.fromChainable(definition),
+        stateMachineType: stepfunctions.StateMachineType.STANDARD,
         timeout: cdk.Duration.minutes(5),
-
         logs: {
           destination: stateMachineLogGroup,
           level: stepfunctions.LogLevel.ALL,
@@ -212,48 +147,28 @@ export class WorkflowStack extends cdk.Stack {
       }
     );
 
-    // =========================================
-    // 13. OUTPUT RESOURCE INFORMATION
-    // =========================================
+    new cdk.CfnOutput(this, 'LambdaFunctionName', {
+      value: workflowLambda.functionName,
+    });
 
-    new cdk.CfnOutput(
-      this,
-      'LambdaFunctionName',
-      {
-        value: workflowLambda.functionName,
-      }
-    );
+    new cdk.CfnOutput(this, 'LambdaFunctionArn', {
+      value: workflowLambda.functionArn,
+    });
 
-    new cdk.CfnOutput(
-      this,
-      'LambdaFunctionArn',
-      {
-        value: workflowLambda.functionArn,
-      }
-    );
+    new cdk.CfnOutput(this, 'StateMachineArn', {
+      value: stateMachine.stateMachineArn,
+    });
 
-    new cdk.CfnOutput(
-      this,
-      'StateMachineArn',
-      {
-        value: stateMachine.stateMachineArn,
-      }
-    );
+    new cdk.CfnOutput(this, 'SSMParameterName', {
+      value: greetingParameter.parameterName,
+    });
 
-    new cdk.CfnOutput(
-      this,
-      'SSMParameterName',
-      {
-        value: greetingParameter.parameterName,
-      }
-    );
+    new cdk.CfnOutput(this, 'LambdaLogGroup', {
+      value: workflowLambdaLogGroup.logGroupName,
+    });
 
-    new cdk.CfnOutput(
-      this,
-      'LambdaLogGroup',
-      {
-        value: workflowLambdaLogGroup.logGroupName,
-      }
-    );
+    new cdk.CfnOutput(this, 'StateMachineLogGroup', {
+      value: stateMachineLogGroup.logGroupName,
+    });
   }
 }
